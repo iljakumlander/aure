@@ -19,9 +19,13 @@ git clone git@github.com:iljakumlander/aure.git
 cd aure
 npm install
 
-# Copy example data and configure
+# Option A: Copy example data and configure
 cp -r data.example data
 # Edit data/config.yaml, data/persona.yaml, data/rules.yaml
+
+# Option B: Point to a separate data repo
+cp .env.example .env
+# Edit .env — set AURE_DATA_DIR to your data directory
 
 # Start (Ollama must be running)
 npm run dev
@@ -61,6 +65,13 @@ data/
 ```
 
 See `data.example/` for templates.
+
+You can keep your data in a separate private repo
+and point aure to it via `.env`:
+
+```
+AURE_DATA_DIR=../my-aure-data
+```
 
 ## API
 

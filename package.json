@@ -1,7 +1,7 @@
 {
   "name": "aure",
   "version": "0.1.0",
-  "description": "Autonomous auto-response engine \u2014 a self-hosted answering machine for your personal site",
+  "description": "Autonomous auto-response engine — a self-hosted answering machine for your personal site",
   "type": "module",
   "engines": {
     "node": ">=20.0.0"
@@ -21,9 +21,10 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^11.0.0",
-    "hono": "^4.0.0",
     "@hono/node-server": "^1.0.0",
+    "better-sqlite3": "^11.0.0",
+    "dotenv": "^17.2.4",
+    "hono": "^4.0.0",
     "yaml": "^2.0.0"
   },
   "devDependencies": {
