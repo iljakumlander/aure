@@ -59,14 +59,14 @@ async function main() {
   // 5. Create server
   const app = new Hono();
 
+  // Static files (frontend) — must be before API so `/` serves index.html
+  app.use('/*', serveStatic({ root: './web/dist' }));
+
   // API routes
   const api = createAPI(responder, data.config.admin.token, llm);
   app.route('/', api);
 
-  // Static files (frontend)
-  app.use('/*', serveStatic({ root: './web/dist' }));
-
-  // Fallback to index.html for SPA routing
+  // Fallback to index.html for non-API, non-static paths
   app.get('*', serveStatic({ root: './web/dist', path: 'index.html' }));
 
   // 6. Start
