@@ -30,8 +30,9 @@ export interface LLMAdapter {
   /**
    * Generate a response from a conversation.
    * The first message should be the system prompt.
+   * Pass an AbortSignal to cancel the request (e.g. visitor pressed cancel).
    */
-  chat(messages: LLMMessage[]): Promise<LLMResponse>;
+  chat(messages: LLMMessage[], signal?: AbortSignal): Promise<LLMResponse>;
 
   /** Check if the provider is reachable */
   health(): Promise<boolean>;

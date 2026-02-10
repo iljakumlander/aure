@@ -60,10 +60,12 @@ export function createResponder(config: ResponderConfig) {
       return matchRule(message, rules);
     },
 
-    /** Process a visitor's message and generate a response */
+    /** Process a visitor's message and generate a response.
+     *  Pass signal to allow cancellation (e.g. visitor pressed cancel). */
     async respond(
       message: string,
-      history: LLMMessage[] = []
+      history: LLMMessage[] = [],
+      signal?: AbortSignal
     ): Promise<RespondResult> {
       // 1. Spam check
       const spam = matchSpam(message, spamRules);
@@ -102,24 +104,15 @@ export function createResponder(config: ResponderConfig) {
         { role: 'user', content: message },
       ];
 
-      // 5. Call LLM
-      try {
-        const response = await llm.chat(messages);
-        return {
-          content: response.content,
-          source: 'llm',
-          spam: false,
-          drop: false,
-        };
-      } catch (error) {
-        console.error('[aure] LLM error:', error);
-        return {
-          content: persona.fallback,
-          source: 'fallback',
-          spam: false,
-          drop: false,
-        };
-      }
+      // 5. Call LLM — let errors propagate to the caller.
+      // Background jobs (jobs.ts) handle errors with proper DB + SSE notification.
+      const response = await llm.chat(messages, signal);
+      return {
+        content: response.content,
+        source: 'llm',
+        spam: false,
+        drop: false,
+      };
     },
   };
 }

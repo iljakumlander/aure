@@ -18,6 +18,8 @@ export interface OllamaProvider {
   maxTokens?: number;
   /** Temperature (0-1). Lower = more predictable */
   temperature?: number;
+  /** Request timeout in seconds. Default: 600 (10 min). Set 0 for no timeout. */
+  timeout?: number;
 }
 
 export interface OpenAIProvider {

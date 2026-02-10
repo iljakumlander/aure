@@ -8,6 +8,9 @@
  *
  * If no SSE listeners are connected, the result sits in the DB
  * and the visitor sees it next time they load the conversation.
+ *
+ * Jobs can be cancelled via cancelJob() — this aborts the Ollama fetch,
+ * which causes Ollama to stop generation server-side.
  */
 
 import type { SSEStreamingApi } from 'hono/streaming';
@@ -19,6 +22,9 @@ type Responder = ReturnType<typeof createResponder>;
 
 /** Active SSE connections per conversation */
 const listeners = new Map<string, Set<SSEStreamingApi>>();
+
+/** Active abort controllers per pending message */
+const activeJobs = new Map<string, AbortController>();
 
 /**
  * Register an SSE stream for a conversation.
@@ -40,6 +46,18 @@ export function addListener(
       if (set.size === 0) listeners.delete(conversationId);
     }
   };
+}
+
+/**
+ * Cancel a pending job. Aborts the Ollama fetch, which stops generation.
+ * Returns true if a job was found and cancelled.
+ */
+export function cancelJob(pendingMessageId: string): boolean {
+  const controller = activeJobs.get(pendingMessageId);
+  if (!controller) return false;
+  controller.abort();
+  activeJobs.delete(pendingMessageId);
+  return true;
 }
 
 /**
@@ -74,9 +92,25 @@ export function processInBackground(
   history: LLMMessage[],
   responder: Responder
 ): void {
+  const controller = new AbortController();
+  activeJobs.set(pendingMessageId, controller);
+
   void (async () => {
+    const startTime = Date.now();
     try {
-      const result = await responder.respond(visitorMessage, history);
+      console.log(`[aure] Processing message ${pendingMessageId} — calling LLM...`);
+      const result = await responder.respond(visitorMessage, history, controller.signal);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      console.log(`[aure] LLM responded in ${elapsed}s (source: ${result.source})`);
+
+      // Race condition: response came back but cancel was requested between
+      // the await resolving and us writing to DB. Honor the cancel.
+      if (controller.signal.aborted) {
+        console.log(`[aure] Job ${pendingMessageId} cancelled (race: response arrived)`);
+        db.resolvePendingMessage(pendingMessageId, '', 'error', { error: 'cancelled' });
+        await notifyListeners(conversationId, 'cancelled', { id: pendingMessageId });
+        return;
+      }
 
       if (result.drop) {
         db.updateConversation(conversationId, { spam: true });
@@ -101,18 +135,36 @@ export function processInBackground(
         content: result.content,
         status: 'received',
         source: result.source,
+        createdAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.error('[aure] Background job failed:', error);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      if (controller.signal.aborted) {
+        // Cancelled by visitor
+        console.log(`[aure] Job ${pendingMessageId} cancelled after ${elapsed}s`);
+        db.resolvePendingMessage(pendingMessageId, '', 'error', { error: 'cancelled' });
+        await notifyListeners(conversationId, 'cancelled', { id: pendingMessageId });
+        return;
+      }
+
+      // Distinguish timeout from other errors
+      const isTimeout = error instanceof Error && error.name === 'TimeoutError';
+      const errorType = isTimeout ? 'timeout' : 'error';
+      console.error(`[aure] Background job failed after ${elapsed}s (${errorType}):`, error);
 
       db.resolvePendingMessage(pendingMessageId, '', 'error', {
         error: error instanceof Error ? error.message : String(error),
+        type: errorType,
       });
 
       await notifyListeners(conversationId, 'error', {
         id: pendingMessageId,
         error: 'Failed to generate response',
+        type: errorType,
       });
+    } finally {
+      activeJobs.delete(pendingMessageId);
     }
   })();
 }

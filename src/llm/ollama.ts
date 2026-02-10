@@ -14,6 +14,7 @@ const DEFAULTS = {
   model: 'qwen2.5:3b',
   maxTokens: 512,
   temperature: 0.7,
+  timeout: 600, // 10 minutes — Pi 5 can take 3-5 min for a response
 };
 
 export function createOllamaAdapter(config: OllamaProvider): LLMAdapter {
@@ -21,13 +22,13 @@ export function createOllamaAdapter(config: OllamaProvider): LLMAdapter {
   const model = config.model ?? DEFAULTS.model;
   const maxTokens = config.maxTokens ?? DEFAULTS.maxTokens;
   const temperature = config.temperature ?? DEFAULTS.temperature;
+  const timeoutSec = config.timeout ?? DEFAULTS.timeout;
 
   return {
     name: `ollama/${model}`,
 
-    async chat(messages: LLMMessage[]): Promise<LLMResponse> {
-      const response = await fetch(`${baseUrl}/api/chat`, {
-        signal: AbortSignal.timeout(120_000),
+    async chat(messages: LLMMessage[], signal?: AbortSignal): Promise<LLMResponse> {
+      const fetchOptions: RequestInit = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -42,7 +43,21 @@ export function createOllamaAdapter(config: OllamaProvider): LLMAdapter {
             temperature,
           },
         }),
-      });
+      };
+
+      // Combine timeout + external cancel signal.
+      // When either fires, the fetch aborts and Ollama stops generation.
+      const signals: AbortSignal[] = [];
+      if (timeoutSec > 0) signals.push(AbortSignal.timeout(timeoutSec * 1000));
+      if (signal) signals.push(signal);
+
+      if (signals.length === 1) {
+        fetchOptions.signal = signals[0];
+      } else if (signals.length > 1) {
+        fetchOptions.signal = AbortSignal.any(signals);
+      }
+
+      const response = await fetch(`${baseUrl}/api/chat`, fetchOptions);
 
       if (!response.ok) {
         const text = await response.text();

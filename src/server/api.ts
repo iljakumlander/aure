@@ -11,7 +11,7 @@ import { streamSSE } from 'hono/streaming';
 import * as db from '../db/index.js';
 import type { createResponder } from '../core/responder.js';
 import type { LLMAdapter, LLMMessage } from '../llm/provider.js';
-import { addListener, processInBackground } from './jobs.js';
+import { addListener, processInBackground, cancelJob } from './jobs.js';
 
 type Responder = ReturnType<typeof createResponder>;
 
@@ -127,6 +127,29 @@ export function createAPI(responder: Responder, adminToken: string, llm: LLMAdap
         removeListener();
       }
     });
+  });
+
+  /** Cancel a pending response — aborts Ollama generation */
+  api.delete('/api/chat/:conversationId/pending', (c) => {
+    const { conversationId } = c.req.param();
+    const conversation = db.getConversation(conversationId);
+    if (!conversation) {
+      return c.json({ error: 'Conversation not found' }, 404);
+    }
+
+    const messages = db.getMessages(conversationId);
+    const pending = messages.find(m => m.status === 'pending');
+    if (!pending) {
+      return c.json({ error: 'No pending message' }, 404);
+    }
+
+    const cancelled = cancelJob(pending.id);
+    if (!cancelled) {
+      // Job finished between our check and cancel attempt
+      return c.json({ error: 'Job already completed' }, 409);
+    }
+
+    return c.json({ ok: true, messageId: pending.id });
   });
 
   /** Poll for messages (fallback, or catch-up after reconnect) */
