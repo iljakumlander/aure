@@ -11,7 +11,7 @@
  */
 
 /** Every message gets a status lifecycle */
-export type MessageStatus = 'received' | 'read' | 'archived' | 'spam';
+export type MessageStatus = 'received' | 'read' | 'archived' | 'spam' | 'pending' | 'error';
 
 /** Who sent this message */
 export type MessageRole = 'visitor' | 'aure';

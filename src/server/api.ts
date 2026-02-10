@@ -7,9 +7,11 @@
  */
 
 import { Hono } from 'hono';
+import { streamSSE } from 'hono/streaming';
 import * as db from '../db/index.js';
 import type { createResponder } from '../core/responder.js';
 import type { LLMAdapter, LLMMessage } from '../llm/provider.js';
+import { addListener, processInBackground } from './jobs.js';
 
 type Responder = ReturnType<typeof createResponder>;
 
@@ -50,35 +52,97 @@ export function createAPI(responder: Responder, adminToken: string, llm: LLMAdap
     // Save the visitor's message
     db.addMessage(conversationId, 'visitor', message);
 
-    // Build history from existing messages
+    // Fast path: spam check (instant, no LLM)
+    const spam = responder.checkSpam(message);
+    if (spam) {
+      db.updateConversation(conversationId, { spam: true });
+      if (spam.action === 'drop') {
+        return c.json({ messageId: null, status: 'dropped' });
+      }
+      const aureMsg = db.addMessage(conversationId, 'aure', responder.persona.fallback);
+      return c.json({ messageId: aureMsg.id, status: 'received', response: responder.persona.fallback });
+    }
+
+    // Fast path: keyword rules (instant, no LLM)
+    const rule = responder.checkRules(message);
+    if (rule) {
+      const aureMsg = db.addMessage(conversationId, 'aure', rule.response);
+      return c.json({ messageId: aureMsg.id, status: 'received', response: rule.response });
+    }
+
+    // Slow path: LLM needed — create pending message, process in background
     const existingMessages = db.getMessages(conversationId);
     const history: LLMMessage[] = existingMessages
-      .slice(-10) // Last 10 messages for context
+      .filter(m => m.status !== 'pending')
+      .slice(-10)
       .map(m => ({
         role: m.role === 'visitor' ? 'user' as const : 'assistant' as const,
         content: m.content,
       }));
 
-    // Generate response
-    const result = await responder.respond(message, history);
+    const pendingMsg = db.addPendingMessage(conversationId, 'aure');
 
-    if (result.drop) {
-      // Silently drop spam — but still acknowledge
-      db.updateConversation(conversationId, { spam: true });
-      return c.json({ response: '' });
+    processInBackground(
+      pendingMsg.id,
+      conversationId,
+      message,
+      history,
+      responder
+    );
+
+    return c.json({ messageId: pendingMsg.id, status: 'pending' }, 202);
+  });
+
+  /** SSE stream for real-time updates on a conversation */
+  api.get('/api/chat/:conversationId/events', (c) => {
+    const { conversationId } = c.req.param();
+    const conversation = db.getConversation(conversationId);
+    if (!conversation) {
+      return c.json({ error: 'Conversation not found' }, 404);
     }
 
-    if (result.spam) {
-      db.updateConversation(conversationId, { spam: true });
-    }
+    return streamSSE(c, async (stream) => {
+      const removeListener = addListener(conversationId, stream);
 
-    // Save aure's response
-    db.addMessage(conversationId, 'aure', result.content);
+      await stream.writeSSE({
+        event: 'connected',
+        data: JSON.stringify({ conversationId }),
+      });
 
-    return c.json({
-      response: result.content,
-      source: result.source,
+      // Heartbeat every 30s to keep connection alive
+      const heartbeat = setInterval(async () => {
+        try {
+          await stream.writeSSE({ event: 'heartbeat', data: '' });
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 30_000);
+
+      try {
+        await new Promise<void>((resolve) => {
+          stream.onAbort(() => resolve());
+        });
+      } finally {
+        clearInterval(heartbeat);
+        removeListener();
+      }
     });
+  });
+
+  /** Poll for messages (fallback, or catch-up after reconnect) */
+  api.get('/api/chat/:conversationId/messages', (c) => {
+    const { conversationId } = c.req.param();
+    const conversation = db.getConversation(conversationId);
+    if (!conversation) {
+      return c.json({ error: 'Conversation not found' }, 404);
+    }
+
+    const after = c.req.query('after');
+    const messages = after
+      ? db.getMessagesSince(conversationId, after)
+      : db.getMessages(conversationId);
+
+    return c.json({ messages });
   });
 
   /** Get conversation history (for reconnecting visitors) */
@@ -109,10 +173,8 @@ export function createAPI(responder: Responder, adminToken: string, llm: LLMAdap
     const lastVisit = db.getLastAdminVisit();
     const conversations = db.listConversations({ includeSpam: false });
 
-    // Record this visit
     db.recordAdminVisit();
 
-    // Mark all as seen
     for (const conv of conversations.filter(c => !c.seen)) {
       db.updateConversation(conv.id, { seen: true });
     }

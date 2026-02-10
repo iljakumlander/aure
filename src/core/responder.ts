@@ -45,6 +45,21 @@ export function createResponder(config: ResponderConfig) {
       return persona.greeting;
     },
 
+    /** Access persona config (for fallback text, etc.) */
+    get persona() {
+      return persona;
+    },
+
+    /** Fast spam check — no LLM call */
+    checkSpam(message: string) {
+      return matchSpam(message, spamRules);
+    },
+
+    /** Fast keyword rules check — no LLM call */
+    checkRules(message: string) {
+      return matchRule(message, rules);
+    },
+
     /** Process a visitor's message and generate a response */
     async respond(
       message: string,

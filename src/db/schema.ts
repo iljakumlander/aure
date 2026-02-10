@@ -27,8 +27,8 @@ export const SCHEMA = `
     id              TEXT PRIMARY KEY,
     conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
     role            TEXT NOT NULL CHECK (role IN ('visitor', 'aure')),
-    content         TEXT NOT NULL,
-    status          TEXT NOT NULL DEFAULT 'received' CHECK (status IN ('received', 'read', 'archived', 'spam')),
+    content         TEXT NOT NULL DEFAULT '',
+    status          TEXT NOT NULL DEFAULT 'received' CHECK (status IN ('received', 'read', 'archived', 'spam', 'pending', 'error')),
     metadata        TEXT DEFAULT '{}',  -- JSON object
     created_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );

@@ -157,6 +157,51 @@ export function updateMessageStatus(id: string, status: Message['status']): void
   ).run(status, id);
 }
 
+export function addPendingMessage(conversationId: string, role: Message['role']): Message {
+  const id = randomUUID();
+  const now = new Date().toISOString();
+
+  getDatabase().prepare(`
+    INSERT INTO messages (id, conversation_id, role, content, status, metadata, created_at)
+    VALUES (?, ?, ?, '', 'pending', '{}', ?)
+  `).run(id, conversationId, role, now);
+
+  getDatabase().prepare(
+    "UPDATE conversations SET updated_at = datetime('now') WHERE id = ?"
+  ).run(conversationId);
+
+  return {
+    id,
+    conversationId,
+    role,
+    content: '',
+    status: 'pending',
+    createdAt: now,
+  };
+}
+
+export function resolvePendingMessage(
+  id: string,
+  content: string,
+  status: Message['status'] = 'received',
+  metadata?: Record<string, unknown>
+): void {
+  getDatabase().prepare(
+    'UPDATE messages SET content = ?, status = ?, metadata = ? WHERE id = ?'
+  ).run(content, status, JSON.stringify(metadata ?? {}), id);
+}
+
+export function getMessagesSince(conversationId: string, since: string, limit = 50): Message[] {
+  const rows = getDatabase().prepare(`
+    SELECT * FROM messages
+    WHERE conversation_id = ? AND created_at > ?
+    ORDER BY created_at ASC
+    LIMIT ?
+  `).all(conversationId, since, limit) as any[];
+
+  return rows.map(rowToMessage);
+}
+
 // ── Admin Sessions ─────────────────────────────────────────
 
 export function recordAdminVisit(): string {

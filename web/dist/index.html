@@ -103,6 +103,8 @@
     button:disabled { opacity: 0.3; cursor: not-allowed; }
     .typing { color: #555; font-style: italic; font-size: 0.85rem; padding: 0.5rem 0; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+    .typing { animation: pulse 1.5s infinite; }
   </style>
 </head>
 <body>
@@ -114,7 +116,7 @@
     <div id="chat"></div>
     <div class="input-area">
       <input id="input" type="text" placeholder="Type a message..." autocomplete="off" disabled />
-      <button id="send" disabled>→</button>
+      <button id="send" disabled>&rarr;</button>
     </div>
   </div>
 
@@ -122,8 +124,12 @@
     const chat = document.getElementById('chat');
     const input = document.getElementById('input');
     const send = document.getElementById('send');
+
     let conversationId = null;
     let busy = false;
+    let eventSource = null;
+    let pendingMessageId = null;
+    let pollTimer = null;
 
     function addMsg(text, role) {
       const div = document.createElement('div');
@@ -139,11 +145,20 @@
       if (on) {
         const el = document.createElement('div');
         el.className = 'typing';
-        el.textContent = '...';
+        el.textContent = 'thinking...';
         chat.appendChild(el);
         chat.scrollTop = chat.scrollHeight;
       }
     }
+
+    function enableInput() {
+      busy = false;
+      send.disabled = false;
+      input.disabled = false;
+      input.focus();
+    }
+
+    // ── Conversation lifecycle ─────────────────────────
 
     async function startConversation() {
       try {
@@ -154,14 +169,50 @@
         });
         const data = await res.json();
         conversationId = data.conversationId;
+        localStorage.setItem('aure_conversation', conversationId);
         addMsg(data.greeting, 'aure');
-        input.disabled = false;
-        send.disabled = false;
-        input.focus();
+        enableInput();
       } catch (e) {
         addMsg('Could not connect to aure. Is the server running?', 'system');
       }
     }
+
+    async function resumeConversation(id) {
+      try {
+        const res = await fetch(`/api/chat/${id}`);
+        if (!res.ok) {
+          localStorage.removeItem('aure_conversation');
+          startConversation();
+          return;
+        }
+        const data = await res.json();
+        conversationId = id;
+
+        let hasPending = false;
+        for (const msg of data.messages) {
+          if (msg.status === 'pending') {
+            hasPending = true;
+            pendingMessageId = msg.id;
+          } else if (msg.content) {
+            addMsg(msg.content, msg.role);
+          }
+        }
+
+        enableInput();
+
+        if (hasPending) {
+          busy = true;
+          send.disabled = true;
+          setTyping(true);
+          connectSSE();
+        }
+      } catch (e) {
+        localStorage.removeItem('aure_conversation');
+        startConversation();
+      }
+    }
+
+    // ── Send message ───────────────────────────────────
 
     async function sendMessage() {
       const text = input.value.trim();
@@ -171,7 +222,6 @@
       input.value = '';
       send.disabled = true;
       addMsg(text, 'visitor');
-      setTyping(true);
 
       try {
         const res = await fetch(`/api/chat/${conversationId}/message`, {
@@ -180,22 +230,102 @@
           body: JSON.stringify({ message: text }),
         });
         const data = await res.json();
-        setTyping(false);
-        if (data.response) addMsg(data.response, 'aure');
-      } catch (e) {
-        setTyping(false);
-        addMsg('Something went wrong. Try again?', 'system');
-      }
 
-      busy = false;
-      send.disabled = false;
-      input.focus();
+        if (res.status === 200) {
+          if (data.response) addMsg(data.response, 'aure');
+          enableInput();
+        } else if (res.status === 202) {
+          pendingMessageId = data.messageId;
+          setTyping(true);
+          connectSSE();
+        }
+      } catch (e) {
+        addMsg('Something went wrong. Try again?', 'system');
+        enableInput();
+      }
     }
+
+    // ── SSE connection ─────────────────────────────────
+
+    function connectSSE() {
+      if (eventSource) return;
+
+      eventSource = new EventSource(`/api/chat/${conversationId}/events`);
+
+      eventSource.addEventListener('message', (e) => {
+        const data = JSON.parse(e.data);
+        setTyping(false);
+        if (data.content) addMsg(data.content, 'aure');
+        pendingMessageId = null;
+        disconnectSSE();
+        enableInput();
+      });
+
+      eventSource.addEventListener('error', (e) => {
+        if (e.data) {
+          setTyping(false);
+          addMsg('Something went wrong generating a response.', 'system');
+          pendingMessageId = null;
+          disconnectSSE();
+          enableInput();
+        }
+      });
+
+      eventSource.onerror = () => {
+        disconnectSSE();
+        if (pendingMessageId) startPolling();
+      };
+    }
+
+    function disconnectSSE() {
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
+      }
+      stopPolling();
+    }
+
+    // ── Polling fallback ───────────────────────────────
+
+    function startPolling() {
+      if (pollTimer) return;
+
+      pollTimer = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/chat/${conversationId}`);
+          const data = await res.json();
+          const resolved = data.messages.find(
+            m => m.id === pendingMessageId && m.status !== 'pending'
+          );
+          if (resolved) {
+            stopPolling();
+            setTyping(false);
+            if (resolved.content) addMsg(resolved.content, 'aure');
+            pendingMessageId = null;
+            enableInput();
+          }
+        } catch { /* retry next interval */ }
+      }, 3000);
+    }
+
+    function stopPolling() {
+      if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+    }
+
+    // ── Events + init ──────────────────────────────────
 
     send.addEventListener('click', sendMessage);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-    startConversation();
+    const saved = localStorage.getItem('aure_conversation');
+    if (saved) {
+      resumeConversation(saved);
+    } else {
+      startConversation();
+    }
   </script>
 </body>
 </html>
