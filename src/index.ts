@@ -60,6 +60,8 @@ async function main() {
   const app = new Hono();
 
   // Static files (frontend) — must be before API so `/` serves index.html
+  const webRoot = resolve(process.cwd(), 'web', 'dist');
+  console.log(`  web:   ${webRoot}`);
   app.use('/*', serveStatic({ root: './web/dist' }));
 
   // API routes
