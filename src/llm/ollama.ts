@@ -27,6 +27,7 @@ export function createOllamaAdapter(config: OllamaProvider): LLMAdapter {
 
     async chat(messages: LLMMessage[]): Promise<LLMResponse> {
       const response = await fetch(`${baseUrl}/api/chat`, {
+        signal: AbortSignal.timeout(120_000),
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
