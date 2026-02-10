@@ -1,0 +1,44 @@
+# Rules — keyword-based overrides that fire BEFORE the LLM.
+# Use these for predictable responses to common questions
+# or to deflect unwanted topics without burning tokens.
+
+rules:
+  - id: contact-phone
+    label: "Phone number request"
+    match:
+      type: keywords
+      keywords: ["phone", "call", "ring", "telephone"]
+    response: |
+      The best way to reach out is to leave a message here.
+      I'll make sure it gets through!
+    priority: 10
+    enabled: true
+
+  - id: hire
+    label: "Hiring inquiry"
+    match:
+      type: keywords
+      keywords: ["hire", "vacancy", "position", "job offer"]
+    response: |
+      Interesting! I'll flag this as important.
+      Could you share a few details about the role?
+      I'll make sure it gets attention.
+    priority: 20
+    enabled: true
+
+# Spam rules — filter out noise
+spam:
+  - id: crypto-spam
+    label: "Crypto spam"
+    match:
+      type: keywords
+      keywords: ["bitcoin", "crypto", "nft", "airdrop", "web3 opportunity"]
+    action: flag
+
+  - id: seo-spam
+    label: "SEO spam"
+    match:
+      type: pattern
+      pattern: "(backlink|SEO|page rank|domain authority)"
+      flags: "i"
+    action: flag
