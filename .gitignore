@@ -3,9 +3,13 @@ node_modules/
 *.db
 *.db-journal
 *.db-wal
+*.db-shm
 
 # Private data (lives in a separate repo)
 data/
+
+# Project inception notes (local only)
+incept/
 
 # Environment
 .env
