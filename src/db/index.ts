@@ -180,15 +180,18 @@ export function addPendingMessage(conversationId: string, role: Message['role'])
   };
 }
 
+/** Resolve a pending message with content. Updates created_at to now (response time, not placeholder time). Returns the timestamp. */
 export function resolvePendingMessage(
   id: string,
   content: string,
   status: Message['status'] = 'received',
   metadata?: Record<string, unknown>
-): void {
+): string {
+  const now = new Date().toISOString();
   getDatabase().prepare(
-    'UPDATE messages SET content = ?, status = ?, metadata = ? WHERE id = ?'
-  ).run(content, status, JSON.stringify(metadata ?? {}), id);
+    'UPDATE messages SET content = ?, status = ?, metadata = ?, created_at = ? WHERE id = ?'
+  ).run(content, status, JSON.stringify(metadata ?? {}), now, id);
+  return now;
 }
 
 export function getMessagesSince(conversationId: string, since: string, limit = 50): Message[] {
@@ -200,6 +203,45 @@ export function getMessagesSince(conversationId: string, since: string, limit = 
   `).all(conversationId, since, limit) as any[];
 
   return rows.map(rowToMessage);
+}
+
+/** Get all visitor messages after the last completed aure response (by insertion order).
+ *  Uses rowid instead of created_at to avoid race condition: resolvePendingMessage
+ *  updates created_at to "now", which is AFTER messages sent during processing. */
+export function getUnrespondedVisitorMessages(conversationId: string): Message[] {
+  const lastAure = getDatabase().prepare(`
+    SELECT rowid FROM messages
+    WHERE conversation_id = ? AND role = 'aure' AND status NOT IN ('pending', 'error')
+    ORDER BY rowid DESC LIMIT 1
+  `).get(conversationId) as any;
+
+  if (lastAure) {
+    const rows = getDatabase().prepare(`
+      SELECT * FROM messages
+      WHERE conversation_id = ? AND role = 'visitor' AND rowid > ?
+      ORDER BY rowid ASC
+    `).all(conversationId, lastAure.rowid) as any[];
+    return rows.map(rowToMessage);
+  }
+
+  // No completed aure messages yet — return all visitor messages
+  const rows = getDatabase().prepare(`
+    SELECT * FROM messages
+    WHERE conversation_id = ? AND role = 'visitor'
+    ORDER BY rowid ASC
+  `).all(conversationId) as any[];
+  return rows.map(rowToMessage);
+}
+
+/** Check if there is a pending aure message (LLM currently processing). */
+export function hasPendingAureMessage(conversationId: string): Message | null {
+  const row = getDatabase().prepare(`
+    SELECT * FROM messages
+    WHERE conversation_id = ? AND role = 'aure' AND status = 'pending'
+    LIMIT 1
+  `).get(conversationId) as any;
+
+  return row ? rowToMessage(row) : null;
 }
 
 // ── Admin Sessions ─────────────────────────────────────────

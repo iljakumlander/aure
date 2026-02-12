@@ -1,13 +1,11 @@
 /**
  * Background job processor for async LLM responses.
  *
- * When a visitor sends a message:
- * 1. API saves visitor msg, creates a pending aure msg, returns 202
- * 2. This module runs the LLM in the background (fire-and-forget promise)
- * 3. When done, saves result to DB and notifies any SSE listeners
- *
- * If no SSE listeners are connected, the result sits in the DB
- * and the visitor sees it next time they load the conversation.
+ * Supports message queuing: visitors can send multiple messages
+ * while the LLM is processing. The job re-fetches all unresponded
+ * visitor messages from DB before calling the LLM, so it always
+ * sees the full queue. After responding, it checks for new messages
+ * that arrived during processing and chains automatically.
  *
  * Jobs can be cancelled via cancelJob() — this aborts the Ollama fetch,
  * which causes Ollama to stop generation server-side.
@@ -82,14 +80,17 @@ async function notifyListeners(
 }
 
 /**
- * Process a visitor message in the background.
- * Called fire-and-forget from the API handler.
+ * Process queued visitor messages in the background.
+ *
+ * Re-fetches all unresponded visitor messages from DB (not just the
+ * triggering message), builds history fresh, calls LLM.
+ *
+ * After responding, checks for new messages that arrived during
+ * processing and chains into a new job automatically.
  */
 export function processInBackground(
   pendingMessageId: string,
   conversationId: string,
-  visitorMessage: string,
-  history: LLMMessage[],
   responder: Responder
 ): void {
   const controller = new AbortController();
@@ -98,13 +99,37 @@ export function processInBackground(
   void (async () => {
     const startTime = Date.now();
     try {
-      console.log(`[aure] Processing message ${pendingMessageId} — calling LLM...`);
-      const result = await responder.respond(visitorMessage, history, controller.signal);
+      // Re-fetch all queued visitor messages (captures any that arrived
+      // between the API handler and now)
+      const unresponded = db.getUnrespondedVisitorMessages(conversationId);
+
+      if (unresponded.length === 0) {
+        console.log(`[aure] No unresponded messages for ${pendingMessageId}, skipping`);
+        db.resolvePendingMessage(pendingMessageId, '', 'error', { error: 'no messages' });
+        return;
+      }
+
+      // Combine all queued messages into one question
+      const combinedQuestion = unresponded.length === 1
+        ? unresponded[0].content
+        : unresponded.map(m => m.content).join('\n\n');
+
+      // Build fresh history from DB
+      const allMessages = db.getMessages(conversationId);
+      const history: LLMMessage[] = allMessages
+        .filter(m => m.status !== 'pending')
+        .slice(-10)
+        .map(m => ({
+          role: m.role === 'visitor' ? 'user' as const : 'assistant' as const,
+          content: m.content,
+        }));
+
+      console.log(`[aure] Processing ${unresponded.length} queued message(s) for ${pendingMessageId} — calling LLM...`);
+      const result = await responder.respond(combinedQuestion, history, controller.signal);
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       console.log(`[aure] LLM responded in ${elapsed}s (source: ${result.source})`);
 
-      // Race condition: response came back but cancel was requested between
-      // the await resolving and us writing to DB. Honor the cancel.
+      // Race condition: cancel arrived while await was resolving
       if (controller.signal.aborted) {
         console.log(`[aure] Job ${pendingMessageId} cancelled (race: response arrived)`);
         db.resolvePendingMessage(pendingMessageId, '', 'error', { error: 'cancelled' });
@@ -125,7 +150,8 @@ export function processInBackground(
         db.updateConversation(conversationId, { spam: true });
       }
 
-      db.resolvePendingMessage(pendingMessageId, result.content, 'received', {
+      // Resolve with the actual response time (not placeholder creation time)
+      const resolvedAt = db.resolvePendingMessage(pendingMessageId, result.content, 'received', {
         source: result.source,
       });
 
@@ -135,20 +161,32 @@ export function processInBackground(
         content: result.content,
         status: 'received',
         source: result.source,
-        createdAt: new Date().toISOString(),
+        createdAt: resolvedAt,
       });
+
+      // Chain: check if more visitor messages arrived during LLM processing
+      const newUnresponded = db.getUnrespondedVisitorMessages(conversationId);
+      if (newUnresponded.length > 0) {
+        console.log(`[aure] ${newUnresponded.length} new message(s) arrived during processing, chaining...`);
+        const newPending = db.addPendingMessage(conversationId, 'aure');
+
+        await notifyListeners(conversationId, 'processing', {
+          pendingMessageId: newPending.id,
+        });
+
+        // Chain into a new job (not recursion — fresh fire-and-forget)
+        processInBackground(newPending.id, conversationId, responder);
+      }
     } catch (error) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
       if (controller.signal.aborted) {
-        // Cancelled by visitor
         console.log(`[aure] Job ${pendingMessageId} cancelled after ${elapsed}s`);
         db.resolvePendingMessage(pendingMessageId, '', 'error', { error: 'cancelled' });
         await notifyListeners(conversationId, 'cancelled', { id: pendingMessageId });
         return;
       }
 
-      // Distinguish timeout from other errors
       const isTimeout = error instanceof Error && error.name === 'TimeoutError';
       const errorType = isTimeout ? 'timeout' : 'error';
       console.error(`[aure] Background job failed after ${elapsed}s (${errorType}):`, error);

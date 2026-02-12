@@ -107,6 +107,30 @@
       opacity: 1;
       max-height: 1.5rem;
     }
+    .status-label {
+      align-self: flex-end;
+      font-size: 0.75rem;
+      color: #555;
+      padding: 0.25rem 1rem;
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      animation: fadeIn 0.3s ease;
+    }
+    .status-text {
+      animation: pulse 1.5s infinite;
+    }
+    .cancel-link {
+      background: none;
+      border: none;
+      color: #666;
+      cursor: pointer;
+      font-size: 0.75rem;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      padding: 0;
+    }
+    .cancel-link:hover { color: #e74c3c; }
     .input-area {
       display: flex;
       gap: 0.5rem;
@@ -138,18 +162,8 @@
     }
     button:hover { background: #16213e; color: #aaa; }
     button:disabled { opacity: 0.3; cursor: not-allowed; }
-    #cancel {
-      background: transparent;
-      color: #666;
-      border: 1px solid #333;
-      font-size: 0.8rem;
-      letter-spacing: 0.05em;
-    }
-    #cancel:hover { color: #e74c3c; border-color: #e74c3c; }
-    .typing { color: #555; font-style: italic; font-size: 0.85rem; padding: 0.5rem 0; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
-    .typing { animation: pulse 1.5s infinite; }
   </style>
 </head>
 <body>
@@ -162,7 +176,6 @@
     <div class="input-area">
       <input id="input" type="text" placeholder="Type a message..." autocomplete="off" disabled />
       <button id="send" disabled>&rarr;</button>
-      <button id="cancel" style="display:none">cancel</button>
     </div>
   </div>
 
@@ -170,24 +183,23 @@
     const chat = document.getElementById('chat');
     const input = document.getElementById('input');
     const send = document.getElementById('send');
-    const cancel = document.getElementById('cancel');
 
     let conversationId = null;
-    let busy = false;
+    let processing = false;
     let eventSource = null;
     let pendingMessageId = null;
     let pollTimer = null;
-    let typingTimer = null;
+    let statusTimer = null;
 
-    // ── Message rendering ──────────────────────────────────
+    // ── Timestamp helpers ──────────────────────────────────
 
-    function addMsg(text, role, createdAt) {
-      const div = document.createElement('div');
-      div.className = `message ${role}`;
-      div.textContent = text;
-      div.dataset.createdAt = createdAt || new Date().toISOString();
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
+    function parseTimestamp(str) {
+      if (!str) return new Date();
+      // Handle SQLite datetime('now') format: '2026-02-12 21:32:00'
+      if (!str.includes('T') && !str.includes('Z') && !str.includes('+')) {
+        str = str.replace(' ', 'T') + 'Z';
+      }
+      return new Date(str);
     }
 
     function formatTimestamp(date) {
@@ -200,6 +212,18 @@
         + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
+    // ── Message rendering ──────────────────────────────────
+
+    function addMsg(text, role, createdAt) {
+      const div = document.createElement('div');
+      div.className = `message ${role}`;
+      div.textContent = text;
+      div.dataset.createdAt = createdAt || new Date().toISOString();
+
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
     // Click on message bubble — toggle timestamp
     chat.addEventListener('click', (e) => {
       const msg = e.target.closest('.message');
@@ -209,53 +233,62 @@
       if (!ts) {
         ts = document.createElement('div');
         ts.className = 'timestamp';
-        const date = new Date(msg.dataset.createdAt);
+        const date = parseTimestamp(msg.dataset.createdAt);
         ts.textContent = formatTimestamp(date);
         msg.appendChild(ts);
       }
       ts.classList.toggle('visible');
     });
 
-    // ── Thinking indicator with elapsed timer ──────────────
+    // ── Processing status label ────────────────────────────
 
-    function setTyping(on) {
-      const existing = document.querySelector('.typing');
-      if (existing) existing.remove();
-      if (typingTimer) { clearInterval(typingTimer); typingTimer = null; }
+    function setProcessing(on) {
+      processing = on;
+
+      // Clean up existing label
+      const existing = document.querySelector('.status-label');
+      if (existing) {
+        if (existing._timer) clearInterval(existing._timer);
+        existing.remove();
+      }
+      if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
 
       if (on) {
-        const el = document.createElement('div');
-        el.className = 'typing';
-        el.textContent = 'thinking...';
+        const label = document.createElement('div');
+        label.className = 'status-label';
+
+        const text = document.createElement('span');
+        text.className = 'status-text';
+        text.textContent = 'Processing...';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'cancel-link';
+        cancelBtn.textContent = 'cancel';
+        cancelBtn.addEventListener('click', cancelPending);
+
+        label.appendChild(text);
+        label.appendChild(cancelBtn);
+
+        // Insert after last visitor message, not at end of chat
+        const visitors = chat.querySelectorAll('.message.visitor');
+        const lastVisitor = visitors.length ? visitors[visitors.length - 1] : null;
+        if (lastVisitor && lastVisitor.nextSibling) {
+          chat.insertBefore(label, lastVisitor.nextSibling);
+        } else {
+          chat.appendChild(label);
+        }
+        chat.scrollTop = chat.scrollHeight;
+
+        // Elapsed timer — shows seconds after 5s
         const startTime = Date.now();
-        typingTimer = setInterval(() => {
+        statusTimer = setInterval(() => {
           const secs = Math.floor((Date.now() - startTime) / 1000);
           if (secs >= 5) {
-            el.textContent = `thinking... ${secs}s`;
+            text.textContent = `Processing... ${secs}s`;
           }
         }, 1000);
-        chat.appendChild(el);
-        chat.scrollTop = chat.scrollHeight;
+        label._timer = statusTimer;
       }
-    }
-
-    // ── Input state management ─────────────────────────────
-
-    function enableInput() {
-      busy = false;
-      send.style.display = '';
-      cancel.style.display = 'none';
-      send.disabled = false;
-      input.disabled = false;
-      input.focus();
-    }
-
-    function setBusy() {
-      busy = true;
-      send.style.display = 'none';
-      cancel.style.display = '';
-      cancel.disabled = false;
-      input.disabled = true;
     }
 
     // ── Error display with retry ───────────────────────────
@@ -330,8 +363,7 @@
         enableInput();
 
         if (hasPending) {
-          setBusy();
-          setTyping(true);
+          setProcessing(true);
           connectSSE();
         }
       } catch (e) {
@@ -340,15 +372,22 @@
       }
     }
 
-    // ── Send message ───────────────────────────────────────
+    // ── Input state ────────────────────────────────────────
+
+    function enableInput() {
+      send.disabled = false;
+      input.disabled = false;
+      input.focus();
+    }
+
+    // ── Send message (non-blocking) ────────────────────────
 
     async function sendMessage() {
       const text = input.value.trim();
-      if (!text || busy || !conversationId) return;
+      if (!text || !conversationId) return;
 
       input.value = '';
       addMsg(text, 'visitor');
-      setBusy();
 
       try {
         const res = await fetch(`/api/chat/${conversationId}/message`, {
@@ -358,39 +397,41 @@
         });
         const data = await res.json();
 
-        if (res.status === 200) {
+        if (res.status === 200 && data.status === 'received') {
+          // Fast path: instant response (rule/spam)
           if (data.response) addMsg(data.response, 'aure');
-          enableInput();
+        } else if (res.status === 200 && data.status === 'queued') {
+          // Message queued — LLM already processing, nothing extra to do
+          if (!pendingMessageId) pendingMessageId = data.pendingMessageId;
+          if (!eventSource) connectSSE();
         } else if (res.status === 202) {
+          // LLM started processing
           pendingMessageId = data.messageId;
-          setTyping(true);
+          setProcessing(true);
           connectSSE();
         }
       } catch (e) {
         showError('Something went wrong. Try again?', true);
-        enableInput();
       }
     }
 
     // ── Cancel pending request ─────────────────────────────
 
-    cancel.addEventListener('click', async () => {
-      if (!conversationId) return;
-      cancel.disabled = true;
+    async function cancelPending() {
+      if (!conversationId || !pendingMessageId) return;
       try {
         await fetch(`/api/chat/${conversationId}/pending`, { method: 'DELETE' });
-      } catch { /* server may be down, clean up locally */ }
+      } catch { /* server may be down */ }
       // SSE 'cancelled' event will handle cleanup.
-      // If no SSE, fall through after a moment.
+      // Fallback if no SSE response within 2s.
       setTimeout(() => {
-        if (busy) {
-          setTyping(false);
+        if (processing) {
+          setProcessing(false);
           pendingMessageId = null;
           disconnectSSE();
-          enableInput();
         }
       }, 2000);
-    });
+    }
 
     // ── SSE connection ─────────────────────────────────────
 
@@ -401,24 +442,29 @@
 
       eventSource.addEventListener('message', (e) => {
         const data = JSON.parse(e.data);
-        setTyping(false);
+        setProcessing(false);
         if (data.content) addMsg(data.content, 'aure', data.createdAt);
         pendingMessageId = null;
-        disconnectSSE();
-        enableInput();
+        // Don't disconnect SSE — chaining may send a 'processing' event next
+      });
+
+      eventSource.addEventListener('processing', (e) => {
+        // Chaining: new LLM job started for messages that arrived during processing
+        const data = JSON.parse(e.data);
+        pendingMessageId = data.pendingMessageId;
+        setProcessing(true);
       });
 
       eventSource.addEventListener('cancelled', () => {
-        setTyping(false);
+        setProcessing(false);
         pendingMessageId = null;
         disconnectSSE();
-        enableInput();
       });
 
       eventSource.addEventListener('error', (e) => {
         if (e.data) {
           const data = JSON.parse(e.data);
-          setTyping(false);
+          setProcessing(false);
           pendingMessageId = null;
           disconnectSSE();
 
@@ -429,7 +475,6 @@
               : 'Something went wrong generating a response.',
             true
           );
-          enableInput();
         }
       });
 
@@ -461,7 +506,7 @@
           );
           if (resolved) {
             stopPolling();
-            setTyping(false);
+            setProcessing(false);
 
             if (resolved.status === 'error') {
               const meta = resolved.metadata || {};
@@ -481,7 +526,6 @@
             }
 
             pendingMessageId = null;
-            enableInput();
           }
         } catch { /* retry next interval */ }
       }, 3000);

@@ -10,7 +10,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import * as db from '../db/index.js';
 import type { createResponder } from '../core/responder.js';
-import type { LLMAdapter, LLMMessage } from '../llm/provider.js';
+import type { LLMAdapter } from '../llm/provider.js';
 import { addListener, processInBackground, cancelJob } from './jobs.js';
 
 type Responder = ReturnType<typeof createResponder>;
@@ -34,7 +34,10 @@ export function createAPI(responder: Responder, adminToken: string, llm: LLMAdap
     });
   });
 
-  /** Send a message in an existing conversation */
+  /** Send a message in an existing conversation.
+   *  Non-blocking: visitors can send multiple messages while LLM processes.
+   *  Returns 200+received (instant rule match), 200+queued (LLM already working),
+   *  or 202+pending (LLM job started). */
   api.post('/api/chat/:conversationId/message', async (c) => {
     const { conversationId } = c.req.param();
     const body = await c.req.json();
@@ -50,7 +53,7 @@ export function createAPI(responder: Responder, adminToken: string, llm: LLMAdap
     }
 
     // Save the visitor's message
-    db.addMessage(conversationId, 'visitor', message);
+    const visitorMsg = db.addMessage(conversationId, 'visitor', message);
 
     // Fast path: spam check (instant, no LLM)
     const spam = responder.checkSpam(message);
@@ -70,23 +73,23 @@ export function createAPI(responder: Responder, adminToken: string, llm: LLMAdap
       return c.json({ messageId: aureMsg.id, status: 'received', response: rule.response });
     }
 
-    // Slow path: LLM needed — create pending message, process in background
-    const existingMessages = db.getMessages(conversationId);
-    const history: LLMMessage[] = existingMessages
-      .filter(m => m.status !== 'pending')
-      .slice(-10)
-      .map(m => ({
-        role: m.role === 'visitor' ? 'user' as const : 'assistant' as const,
-        content: m.content,
-      }));
+    // Check if LLM is already processing for this conversation
+    const existing = db.hasPendingAureMessage(conversationId);
+    if (existing) {
+      // LLM already working — message is saved, it'll be picked up
+      return c.json({
+        messageId: visitorMsg.id,
+        status: 'queued',
+        pendingMessageId: existing.id,
+      });
+    }
 
+    // Slow path: start LLM processing (jobs.ts re-fetches all queued messages)
     const pendingMsg = db.addPendingMessage(conversationId, 'aure');
 
     processInBackground(
       pendingMsg.id,
       conversationId,
-      message,
-      history,
       responder
     );
 
