@@ -107,15 +107,15 @@ Ollama runs on Raspberry Pi 5 (16GB RAM) with ARM64.
 # Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Pull a model (qwen2.5 has good multilingual support)
-ollama pull qwen2.5:3b
+# Pull a model (gemma3:1b — best speed/quality on Pi 5)
+ollama pull gemma3:1b
 
 # Verify
 ollama list
 ```
 
-Default model in config is `qwen2.5:3b` (~2.2GB RAM, ~20 tok/s on Pi 5).
-For better quality at slower speed: `qwen2.5:7b` (~4.5GB, ~3-5 tok/s).
+Default model is `gemma3:1b` (~1.5GB RAM, 15-20 tok/s on Pi 5, 128K context).
+For multilingual (Russian etc.): `qwen2.5:3b` (~2.2GB, ~5-8 tok/s).
 
 ## LLM providers
 

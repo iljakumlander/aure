@@ -12,7 +12,7 @@ export interface OllamaProvider {
   type: 'ollama';
   /** Ollama API base URL. Default: http://localhost:11434 */
   baseUrl?: string;
-  /** Model name. Default: qwen2.5:3b */
+  /** Model name. Default: gemma3:1b */
   model?: string;
   /** Max tokens to generate */
   maxTokens?: number;
@@ -46,7 +46,7 @@ export type LLMProvider = OllamaProvider | OpenAIProvider | AnthropicProvider;
 export const DEFAULT_PROVIDER: OllamaProvider = {
   type: 'ollama',
   baseUrl: 'http://localhost:11434',
-  model: 'qwen2.5:3b',
+  model: 'gemma3:1b',
   maxTokens: 512,
   temperature: 0.7,
 };

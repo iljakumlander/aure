@@ -11,7 +11,7 @@ import type { LLMAdapter, LLMMessage, LLMResponse } from './provider.js';
 
 const DEFAULTS = {
   baseUrl: 'http://localhost:11434',
-  model: 'qwen2.5:3b',
+  model: 'gemma3:1b',
   maxTokens: 512,
   temperature: 0.7,
   timeout: 600, // 10 minutes — Pi 5 can take 3-5 min for a response
