@@ -111,14 +111,19 @@
       align-self: flex-end;
       font-size: 0.75rem;
       color: #555;
-      padding: 0.25rem 1rem;
+      padding: 0 1rem;
+      margin-top: -0.4rem;
       display: flex;
-      gap: 0.75rem;
+      gap: 0.5rem;
       align-items: center;
       animation: fadeIn 0.3s ease;
     }
     .status-text {
+      font-weight: 600;
       animation: pulse 1.5s infinite;
+    }
+    .status-time {
+      font-weight: 400;
     }
     .cancel-link {
       background: none;
@@ -126,11 +131,12 @@
       color: #666;
       cursor: pointer;
       font-size: 0.75rem;
+      font-weight: 400;
       text-decoration: underline;
       text-underline-offset: 2px;
       padding: 0;
     }
-    .cancel-link:hover { color: #e74c3c; }
+    .cancel-link:hover { color: #e74c3c; background: none; }
     .input-area {
       display: flex;
       gap: 0.5rem;
@@ -164,7 +170,40 @@
     button:disabled { opacity: 0.3; cursor: not-allowed; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
+    /* Markdown inside aure messages */
+    .message.aure p { margin: 0.4rem 0; }
+    .message.aure p:first-child { margin-top: 0; }
+    .message.aure p:last-child { margin-bottom: 0; }
+    .message.aure strong { font-weight: 600; }
+    .message.aure ul, .message.aure ol { margin: 0.4rem 0; padding-left: 1.25rem; }
+    .message.aure li { margin: 0.15rem 0; }
+    .message.aure code {
+      background: rgba(255,255,255,0.08);
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.25rem;
+      font-size: 0.85em;
+    }
+    .message.aure pre {
+      background: rgba(255,255,255,0.06);
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.5rem;
+      overflow-x: auto;
+      margin: 0.4rem 0;
+    }
+    .message.aure pre code { background: none; padding: 0; }
+    .message.aure h1, .message.aure h2, .message.aure h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+      margin: 0.5rem 0 0.25rem;
+    }
+    .message.aure blockquote {
+      border-left: 2px solid #444;
+      padding-left: 0.75rem;
+      color: #888;
+      margin: 0.4rem 0;
+    }
   </style>
+  <script src="vendor/marked.min.js"></script>
 </head>
 <body>
   <div class="container">
@@ -217,7 +256,11 @@
     function addMsg(text, role, createdAt) {
       const div = document.createElement('div');
       div.className = `message ${role}`;
-      div.textContent = text;
+      if (role === 'aure' && typeof marked !== 'undefined') {
+        div.innerHTML = marked.parse(text);
+      } else {
+        div.textContent = text;
+      }
       div.dataset.createdAt = createdAt || new Date().toISOString();
 
       chat.appendChild(div);
@@ -261,12 +304,16 @@
         text.className = 'status-text';
         text.textContent = 'Processing...';
 
+        const time = document.createElement('span');
+        time.className = 'status-time';
+
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'cancel-link';
-        cancelBtn.textContent = 'cancel';
+        cancelBtn.textContent = 'Cancel';
         cancelBtn.addEventListener('click', cancelPending);
 
         label.appendChild(text);
+        label.appendChild(time);
         label.appendChild(cancelBtn);
 
         // Insert after last visitor message, not at end of chat
@@ -284,10 +331,29 @@
         statusTimer = setInterval(() => {
           const secs = Math.floor((Date.now() - startTime) / 1000);
           if (secs >= 5) {
-            text.textContent = `Processing... ${secs}s`;
+            time.textContent = `${secs}s`;
           }
         }, 1000);
         label._timer = statusTimer;
+      }
+    }
+
+    function setProcessed(createdAt) {
+      processing = false;
+      if (statusTimer) { clearInterval(statusTimer); statusTimer = null; }
+      const existing = document.querySelector('.status-label');
+      if (existing) {
+        if (existing._timer) clearInterval(existing._timer);
+        existing.innerHTML = '';
+        const text = document.createElement('span');
+        text.className = 'status-text';
+        text.textContent = 'Processed';
+        text.style.animation = 'none';
+        const timeStr = document.createElement('span');
+        timeStr.className = 'status-time';
+        timeStr.textContent = formatTimestamp(parseTimestamp(createdAt));
+        existing.appendChild(text);
+        existing.appendChild(timeStr);
       }
     }
 
@@ -442,7 +508,7 @@
 
       eventSource.addEventListener('message', (e) => {
         const data = JSON.parse(e.data);
-        setProcessing(false);
+        setProcessed(data.createdAt);
         if (data.content) addMsg(data.content, 'aure', data.createdAt);
         pendingMessageId = null;
         // Don't disconnect SSE — chaining may send a 'processing' event next
@@ -506,9 +572,9 @@
           );
           if (resolved) {
             stopPolling();
-            setProcessing(false);
 
             if (resolved.status === 'error') {
+              setProcessing(false);
               const meta = resolved.metadata || {};
               if (meta.error === 'cancelled') {
                 // Was cancelled, just clean up
@@ -522,7 +588,10 @@
                 );
               }
             } else if (resolved.content) {
+              setProcessed(resolved.createdAt);
               addMsg(resolved.content, 'aure', resolved.createdAt);
+            } else {
+              setProcessing(false);
             }
 
             pendingMessageId = null;
