@@ -54,6 +54,7 @@ async function main() {
     rules: data.rules,
     spamRules: data.spamRules,
     chunks: data.chunks,
+    memories: data.memories,
     llm,
   });
 
@@ -86,6 +87,7 @@ async function main() {
     console.log(`  ✓ persona: ${data.persona.name}`);
     console.log(`  ✓ rules: ${data.rules.length} active, ${data.spamRules.length} spam filters`);
     console.log(`  ✓ data sources: ${data.chunks.length} chunks loaded`);
+    console.log(`  ✓ memories: ${data.memories.length} loaded`);
     console.log('');
   });
 }

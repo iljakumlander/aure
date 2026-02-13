@@ -9,7 +9,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, extname } from 'node:path';
 import { parse as parseYaml } from './yaml.js';
-import type { AureConfig, Persona, Rule, SpamRule, DataChunk, DataSource } from '../types/index.js';
+import type { AureConfig, Persona, Rule, SpamRule, DataChunk, DataSource, MemoryPair } from '../types/index.js';
 
 export interface LoadedData {
   config: AureConfig;
@@ -17,6 +17,7 @@ export interface LoadedData {
   rules: Rule[];
   spamRules: SpamRule[];
   chunks: DataChunk[];
+  memories: MemoryPair[];
 }
 
 /**
@@ -45,12 +46,18 @@ export function loadData(dataDir: string): LoadedData {
 
   const chunks = loadSources(dataDir, config.sources ?? []);
 
+  const memoriesPath = join(dataDir, 'memories.yaml');
+  const memories: MemoryPair[] = existsSync(memoriesPath)
+    ? (parseYaml(readFileSync(memoriesPath, 'utf-8')) as MemoryPair[]) ?? []
+    : [];
+
   return {
     config,
     persona,
     rules: rulesData.rules ?? [],
     spamRules: rulesData.spam ?? [],
     chunks,
+    memories,
   };
 }
 

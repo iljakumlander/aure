@@ -33,3 +33,7 @@ export type {
   DataSource,
   AureConfig,
 } from './data.js';
+
+export type {
+  MemoryPair,
+} from './memory.js';

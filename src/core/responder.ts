@@ -13,7 +13,7 @@
  *   6. Return response
  */
 
-import type { Persona, Rule, SpamRule, DataChunk } from '../types/index.js';
+import type { Persona, Rule, SpamRule, DataChunk, MemoryPair } from '../types/index.js';
 import type { LLMAdapter, LLMMessage } from '../llm/provider.js';
 import { matchRule, matchSpam } from './rules-engine.js';
 
@@ -22,6 +22,7 @@ export interface ResponderConfig {
   rules: Rule[];
   spamRules: SpamRule[];
   chunks: DataChunk[];
+  memories: MemoryPair[];
   llm: LLMAdapter;
 }
 
@@ -37,7 +38,7 @@ export interface RespondResult {
 }
 
 export function createResponder(config: ResponderConfig) {
-  const { persona, rules, spamRules, chunks, llm } = config;
+  const { persona, rules, spamRules, chunks, memories, llm } = config;
 
   return {
     /** Get the greeting message for a new conversation */
@@ -98,8 +99,16 @@ export function createResponder(config: ResponderConfig) {
       const systemPrompt = buildSystemPrompt(persona, context);
 
       // 4. Build messages array
+      //    Memories go between system prompt and real history —
+      //    the model treats them as its own past answers and stays consistent.
+      const memoryMessages: LLMMessage[] = memories.flatMap(m => [
+        { role: 'user' as const, content: m.user },
+        { role: 'assistant' as const, content: m.assistant },
+      ]);
+
       const messages: LLMMessage[] = [
         { role: 'system', content: systemPrompt },
+        ...memoryMessages,
         ...history,
         { role: 'user', content: message },
       ];
