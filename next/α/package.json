@@ -1,0 +1,37 @@
+{
+  "name": "@aure/alpha",
+  "version": "0.1.0",
+  "description": "RAG engine for Aure — local-first, hardware-aware retrieval",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/cli/main.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "aure": "tsx src/cli/main.ts"
+  },
+  "bin": {
+    "aure": "./dist/cli/main.js"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "citty": "^0.2.1",
+    "epub2": "^3.0.2",
+    "pdf-parse": "^1.1.1",
+    "sqlite-vec": "^0.1.6",
+    "yaml": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

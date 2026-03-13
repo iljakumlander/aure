@@ -1,0 +1,26 @@
+{
+  "name": "@aure/web",
+  "version": "0.1.0",
+  "description": "Aure chatbot — web interface powered by α",
+  "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "hono": "^4.0.0",
+    "@hono/node-server": "^1.0.0",
+    "yaml": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0"
+  }
+}

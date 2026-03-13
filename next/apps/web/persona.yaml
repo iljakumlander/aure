@@ -1,0 +1,18 @@
+# Aure persona configuration
+# Place this file next to the web app (apps/web/)
+
+name: Aure
+
+# Public system prompt — defines the assistant's role
+# systemPrompt: "You are {{name}}, a helpful assistant..."
+
+# Private instructions — not shown to visitors, guides behavior
+# Use this for tone, rules, domain knowledge the LLM should follow
+# instructions: |
+#   Add domain-specific instructions here.
+#   Example:
+#   You are the assistant for Acme Corp.
+#   Answer in the same language the visitor uses.
+#   Keep answers short and practical.
+
+# greeting: "Hello! I'm {{name}}..."

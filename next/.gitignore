@@ -1,0 +1,14 @@
+node_modules/
+dist/
+
+# Reference documents (user-specific, often large)
+α/reference/
+
+# Runtime databases (SQLite + WAL/SHM journals)
+*.db
+*.db-wal
+*.db-shm
+
+# Environment
+.env
+.env.*

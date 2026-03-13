@@ -1,0 +1,35 @@
+# Aure α configuration
+# See PROSPECT.md for full documentation
+
+preset: pi5
+embedding:
+  provider: ollama
+  model: all-minilm
+  baseUrl: http://localhost:11434
+  dimensions: 384
+  batchSize: 8
+vectordb:
+  adapter: sqlite-vec
+  path: ./aure-vectors.db
+chunking:
+  strategy: semantic
+  maxTokens: 256
+  overlap: 32
+  respectBoundaries: true
+retrieval:
+  topK: 3
+  scoreThreshold: 0.3
+  rerank: false
+reference:
+  path: ./reference
+  watch: false
+  supportedTypes:
+    - .pdf
+    - .md
+    - .txt
+    - .epub
+server:
+  port: 3001
+  host: 0.0.0.0
+llm:
+  model: qwen2.5:3b

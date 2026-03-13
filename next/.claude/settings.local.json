@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "Bash(npm install)",
+      "Bash(npx tsc --noEmit)",
+      "Bash(npm test)",
+      "Bash(npx tsx src/cli/main.ts --help)",
+      "Bash(npx vitest run src/parsers/)",
+      "Bash(npx vitest run src/chunker/)",
+      "Bash(npx vitest run src/embedder/)",
+      "Bash(node -e \"const sv = require\\(''sqlite-vec''\\); console.log\\(Object.keys\\(sv\\)\\); console.log\\(sv.getLoadablePath\\(\\)\\)\")",
+      "Bash(node -e \":*)",
+      "Bash(npx vitest run src/vectordb/)",
+      "Bash(npx tsx src/cli/main.ts ingest --help)"
+    ]
+  }
+}
